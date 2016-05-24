@@ -1,13 +1,13 @@
 {
-  "name": "ionic2chat-server",
+  "name": "ionic-chat-server",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "chatServer.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "rajayogan",
-  "license": "MIT",
+  "author": "xujiabao",
+  "license": "HUST",
   "dependencies": {
     "express": "^4.13.4",
     "socket.io": "^1.4.5"
