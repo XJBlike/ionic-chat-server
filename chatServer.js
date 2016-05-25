@@ -304,6 +304,46 @@ io.on('connection', function(socket){
 			}
 		});
 	});
+    socket.on("users",function(data){
+		var currentUser ={
+			id:data.userId,
+            socket:socket
+		};
+		var usersSql = "select id from userInfo";
+		sqlConnection.query(usersSql,function(err,rows){
+			if(err){
+				throw err;
+			}else{
+				currentUser.socket.emit("users:success",{users:rows});
+			}
+		});
+	});
+	socket.on("register",function(data){
+		var newUserSql = "insert into userInfo values(\'"
+			+data.user.id+ "\',\'" + data.user.nickname+ "\',\'" + data.user.password+"\',\'"+data.user.description+"\',\'"+data.user.sex+"\',\'"+data.user.location+"\',"+data.user.img+")";
+		var newMessageTableSql = "create table message_"+data.user.id+" (friendId varchar(10) PRIMARY KEY not NULL,record MEDIUMTEXT NOT NULL)";
+		console.log(newUserSql);
+		console.log(newMessageTableSql);
+		var currentUser ={
+			id:data.user.id,
+			socket:socket
+		};
+		sqlConnection.query(newUserSql,function(err,rows){
+			if(err){
+				throw err;
+			}else{
+				console.log("新用户"+data.user.id+"注册成功");
+			}
+		});
+		sqlConnection.query(newMessageTableSql,function(err,rows){
+			if(err){
+				throw err;
+			}else{
+				console.log("新用户"+data.user.id+"的聊天记录表建立成功");
+			}
+		});
+		socket.emit('register:success',{info:"注册成功,自动登录！"});
+	});
 	//监听用户发布聊天内容
 	socket.on('message', function(obj){
 		//向所有客户端广播发布的消息
