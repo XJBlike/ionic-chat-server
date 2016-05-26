@@ -7,8 +7,20 @@ app.get('/', function(req, res){
 	res.send('<h1>Welcome Realtime Server</h1>');
 });
 
-//在线用户列表
-var onlineUsers = [];
+var onlineUsers = {};
+
+var messageStruct = {
+	"id":null,
+	"backname":null,
+	"nickname":null,
+	"img":null,
+	"lastMessage":{},
+	"noReadMessages":0,
+	"showHints":true,
+	"isTop":0,
+	"showMessage":true,
+	"message":[]
+};
 
 var sqlConnection = mysql.createConnection({
 	host:"localhost",
@@ -22,12 +34,20 @@ var sqlConnection = mysql.createConnection({
 sqlConnection.connect();
 
 var findSocket = function(id){
-	for(var i = 0;i < onlineUsers.length;i++){
-		if(onlineUsers[i].id == id){
-			return onlineUsers[i];
+	for(var i = 0;i < io.sockets.sockets.length;i++){
+		if(io.sockets.sockets[i].id == id){
+			return io.sockets.sockets[i];
 		}
 	}
 	return {};
+};
+var isUseronline = function(id){
+	for(var i =0;i<onlineUsers.length;i++){
+		if(onlineUsers[i].id == id){
+			return true;
+		}
+	}
+	return false;
 };
 
 var deleteSocket = function(id){
@@ -40,7 +60,7 @@ var deleteSocket = function(id){
 	return false;
 };
 
-io.on('connection', function(socket){
+io.sockets.on('connection', function(socket){
 	console.log('a user connected');
 
 
@@ -50,10 +70,8 @@ io.on('connection', function(socket){
             id: obj.userId,
 			socket:socket
 		};
-		socket.id=obj.userId;
-		//将新加入用户的唯一标识当作socket的名称，后面退出的时候会用到
-		//socket.id = obj.userId;
-		//console.log(socket);
+		onlineUsers[obj.userId] = socket;
+		socket.id = obj.userId;
 		var loginSql = 'select * from userInfo where id=\''
 			+ obj.userId
 		    + '\' and password=\''
@@ -64,7 +82,6 @@ io.on('connection', function(socket){
 				throw err;
 			}else{
 				if(rows.length > 0){
-					onlineUsers.push(currentUser);
 					currentUser.socket.emit("login:success",{userInfo: rows[0]});
 					console.log(rows[0].id+"("+rows[0].nickname+")登录成功")
 				}
@@ -295,7 +312,6 @@ io.on('connection', function(socket){
 			"\',\'" +userId+
 			"\',\'" +message+
 			"\')";
-		console.log(addFriendSql);
 		sqlConnection.query(addFriendSql,function(err,rows){
 			if(err){
 				throw err;
@@ -322,8 +338,7 @@ io.on('connection', function(socket){
 		var newUserSql = "insert into userInfo values(\'"
 			+data.user.id+ "\',\'" + data.user.nickname+ "\',\'" + data.user.password+"\',\'"+data.user.description+"\',\'"+data.user.sex+"\',\'"+data.user.location+"\',"+data.user.img+")";
 		var newMessageTableSql = "create table message_"+data.user.id+" (friendId varchar(10) PRIMARY KEY not NULL,record MEDIUMTEXT NOT NULL)";
-		console.log(newUserSql);
-		console.log(newMessageTableSql);
+		var addServantSql = "insert into friends values('111111','"+data.user.id+"','用户'),('"+data.user.id+"','111111','客服-doge')";
 		var currentUser ={
 			id:data.user.id,
 			socket:socket
@@ -342,13 +357,81 @@ io.on('connection', function(socket){
 				console.log("新用户"+data.user.id+"的聊天记录表建立成功");
 			}
 		});
+		sqlConnection.query(addServantSql,function(err,rows){
+			if(err){
+				throw err;
+			}else{
+				console.log("添加客服成功");
+			}
+		});
 		socket.emit('register:success',{info:"注册成功,自动登录！"});
 	});
+
+	socket.on("messages:getAll",function(data){
+		var userId = data.userId;
+		var currentUser = {
+			id:userId,
+			socket:socket
+		};
+		var messageRecordSql = "select record from message_"+userId;
+		sqlConnection.query(messageRecordSql,function(err,rows){
+			if(err){
+				throw err;
+			}else{
+				if(rows.length){
+					currentUser.socket.emit("messages:getAllSuccess",{messages:rows});
+				}
+				else{
+					console.log("暂无聊天记录");
+					currentUser.socket.emit("messages:getAllSuccess",{messages:[]});
+				}
+			}
+		});
+	});
+
 	//监听用户发布聊天内容
-	socket.on('message', function(obj){
-		//向所有客户端广播发布的消息
-		io.emit('message', obj);
-		console.log(obj.username+'说：'+obj.content);
+	socket.on('message:send', function(data){
+          var userId = data.userId;
+		  var friendId = data.friendId;
+		  var message = data.currentMessage;
+		  var friendSocket = onlineUsers[friendId];
+		  message.isFromMe = false;
+		friendSocket.emit("message:receive",{friendId:userId,message:message});
+	});
+
+	socket.on("updateRecord",function(data){
+		var userRecord = data.record;
+		var updateRecordSql = "update message_"+data.userId+" set record = '"+JSON.stringify(data.record)+"' where friendId='"+data.friendId+"'";
+		var record = {};
+		var friendRecordSql = "select record from message_"+data.friendId+" where friendId = '"+data.userId+"'";
+		console.log(friendRecordSql);
+		sqlConnection.query(friendRecordSql,function(err,rows){
+			if(err){
+				throw err;
+			}else{
+				record = JSON.parse(rows[0].record);
+				record.lastMessage = userRecord.lastMessage;
+				record.messages = userRecord.messages;
+				record.lastMessage.isFromMe = !record.lastMessage.isFromMe;
+				for(var i =0;i<record.messages.length;i++){
+					record.messages[i].isFromMe = !record.messages[i].isFromMe;
+				}
+			}
+		});
+		sqlConnection.query(updateRecordSql,function(err,rows){
+			if(err){
+				throw err;
+			}else if(rows.length){
+				console.log("message_"+data.userId+"表已经更新");
+			}
+		});
+		sqlConnection.query("update message_"+data.friendId+" set record = '"+JSON.stringify(record)+"' where friendId='"+data.userId+"'",function(err,rows){
+			if(err){
+				throw err;
+			}else if(rows.length){
+				console.log("message_"+data.friendId+"表已经更新");
+			}
+		});
 	});
   
 });
