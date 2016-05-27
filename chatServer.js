@@ -232,10 +232,8 @@ io.on('connection', function(socket){
 	});
 
 	socket.on('friendInfo',function(data){
-		var friendInfoSql = "select id,nickname,description,img,sex,location,backname from userinfo,friends where id=friendId and "
-			+ "friendId = \'"
-			+ data.friendId
-			+ "\' and userId = \'"
+		var friendInfoSql = "select id,nickname,description,img,sex,location,backname from userinfo,friends where id=friendId"
+			+ " and userId = \'"
 			+data.userId
 			+ "\'";
 		var currentUser = {
@@ -246,9 +244,7 @@ io.on('connection', function(socket){
 			if(err){
 				throw err;
 			}else{
-				if(rows.length>0){
-					currentUser.socket.emit("friendInfo:success",{friendInfo:rows[0]});
-				}
+				currentUser.socket.emit("friendInfo:success",{friendInfo:rows});
 			}
 		});
 	});
