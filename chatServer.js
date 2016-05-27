@@ -10,16 +10,25 @@ app.get('/', function(req, res){
 var onlineUsers = {};
 
 var messageStruct = {
-	"id":null,
-	"backname":null,
-	"nickname":null,
-	"img":null,
-	"lastMessage":{},
-	"noReadMessages":0,
-	"showHints":true,
-	"isTop":0,
+	"id": null,
+	"backname": null,
+	"nickname": null,
+	"img": null,
+	"lastMessage": {},
+	"noReadMessages": 0,
+	"showHints": true,
+	"isTop": 0,
 	"showMessage":true,
-	"message":[]
+	"messages": []
+};
+
+var isMessageInArray = function(arr,message){
+	for(var i=0;i<arr.length;i++){
+		if(arr[i].content == message && message.time == arr[i].time){
+			return true;
+		}
+	}
+	return false;
 };
 
 var sqlConnection = mysql.createConnection({
@@ -33,64 +42,43 @@ var sqlConnection = mysql.createConnection({
 });
 sqlConnection.connect();
 
-var findSocket = function(id){
-	for(var i = 0;i < io.sockets.sockets.length;i++){
-		if(io.sockets.sockets[i].id == id){
-			return io.sockets.sockets[i];
-		}
-	}
-	return {};
-};
-var isUseronline = function(id){
-	for(var i =0;i<onlineUsers.length;i++){
-		if(onlineUsers[i].id == id){
-			return true;
-		}
-	}
-	return false;
-};
 
-var deleteSocket = function(id){
-	for(var i = 0;i < onlineUsers.length;i++){
-		if(onlineUsers[i].id == id){
-			onlineUsers.splice(i,1);
-			return true;
-		}
-	}
-	return false;
-};
-
-io.sockets.on('connection', function(socket){
+io.on('connection', function(socket){
 	console.log('a user connected');
 
 
 	//监听新用户加入
 	socket.on('login', function(obj){
-		var currentUser = {
-            id: obj.userId,
-			socket:socket
-		};
-		onlineUsers[obj.userId] = socket;
-		socket.id = obj.userId;
-		var loginSql = 'select * from userInfo where id=\''
-			+ obj.userId
-		    + '\' and password=\''
-			+ obj.password
-		    + '\';';
-		sqlConnection.query(loginSql, function(err, rows) {
-			if (err) {
-				throw err;
-			}else{
-				if(rows.length > 0){
-					currentUser.socket.emit("login:success",{userInfo: rows[0]});
-					console.log(rows[0].id+"("+rows[0].nickname+")登录成功")
+		if(onlineUsers[obj.userId]){
+			socket.emit("login:fail",{err:"不能重复登录！"});
+		}else{
+			onlineUsers[obj.userId] = socket;
+			socket.id = obj.userId;
+			var currentUser = {
+				id: obj.userId,
+				socket:socket
+			};
+			console.log("登录，刚登陆的用户socket为："+onlineUsers[currentUser.id].toString());
+			var loginSql = 'select * from userInfo where id=\''
+				+ obj.userId
+				+ '\' and password=\''
+				+ obj.password
+				+ '\';';
+			sqlConnection.query(loginSql, function(err, rows) {
+				if (err) {
+					throw err;
+				}else{
+					if(rows.length > 0){
+						currentUser.socket.emit("login:success",{userInfo: rows[0]});
+						console.log(rows[0].id+"("+rows[0].nickname+")登录成功")
+					}
+					else{
+						currentUser.socket.emit("login:fail",{err: "用户名或密码错误!"});
+						currentUser = {};
+					}
 				}
-				else{
-					currentUser.socket.emit("login:fail",{err: "用户名或密码错误!"});
-					currentUser = {};
-				}
-			}
-		});
+			});
+		}
 	});
 
 	socket.on('changeImg',function(data){
@@ -178,10 +166,11 @@ io.sockets.on('connection', function(socket){
 
 	//监听用户退出
 	socket.on('logout', function(data){
-		   if(deleteSocket(data.userInfo.id)){
-			   console.log(data.userInfo.id+"("+data.userInfo.nickname+")退出成功");
+		   if(onlineUsers[data.userInfo.id]){
+			   console.log(data.userInfo.id+"("+data.userInfo.nickname+")退出成功,删去socket:"+onlineUsers[data.userInfo.id]);
+			   delete onlineUsers[data.userInfo.id];
 		}else{
-			   console.log(data.userInfo.id+"("+data.userInfo.nickname+")退出失败");
+			   console.log(data.userInfo.id+"("+data.userInfo.nickname+")退出失败,无其socket");
 		   }
 	});
 
@@ -337,8 +326,7 @@ io.sockets.on('connection', function(socket){
 	socket.on("register",function(data){
 		var newUserSql = "insert into userInfo values(\'"
 			+data.user.id+ "\',\'" + data.user.nickname+ "\',\'" + data.user.password+"\',\'"+data.user.description+"\',\'"+data.user.sex+"\',\'"+data.user.location+"\',"+data.user.img+")";
-		var newMessageTableSql = "create table message_"+data.user.id+" (friendId varchar(10) PRIMARY KEY not NULL,record MEDIUMTEXT NOT NULL)";
-		var addServantSql = "insert into friends values('111111','"+data.user.id+"','用户'),('"+data.user.id+"','111111','客服-doge')";
+		//var newMessageTableSql = "create table message_"+data.user.id+" (friendId varchar(10) PRIMARY KEY not NULL,record MEDIUMTEXT NOT NULL)";
 		var currentUser ={
 			id:data.user.id,
 			socket:socket
@@ -350,89 +338,147 @@ io.sockets.on('connection', function(socket){
 				console.log("新用户"+data.user.id+"注册成功");
 			}
 		});
-		sqlConnection.query(newMessageTableSql,function(err,rows){
-			if(err){
-				throw err;
-			}else{
-				console.log("新用户"+data.user.id+"的聊天记录表建立成功");
-			}
-		});
-		sqlConnection.query(addServantSql,function(err,rows){
-			if(err){
-				throw err;
-			}else{
-				console.log("添加客服成功");
-			}
-		});
-		socket.emit('register:success',{info:"注册成功,自动登录！"});
+		//sqlConnection.query(newMessageTableSql,function(err,rows){
+		//	if(err){
+		//		throw err;
+		//	}else{
+		//		console.log("新用户"+data.user.id+"的聊天记录表建立成功");
+		//	}
+		//});
+		currentUser.socket.emit('register:success',{info:"注册成功,自动登录！"});
 	});
 
-	socket.on("messages:getAll",function(data){
-		var userId = data.userId;
-		var currentUser = {
-			id:userId,
-			socket:socket
-		};
-		var messageRecordSql = "select record from message_"+userId;
-		sqlConnection.query(messageRecordSql,function(err,rows){
-			if(err){
-				throw err;
-			}else{
-				if(rows.length){
-					currentUser.socket.emit("messages:getAllSuccess",{messages:rows});
-				}
-				else{
-					console.log("暂无聊天记录");
-					currentUser.socket.emit("messages:getAllSuccess",{messages:[]});
-				}
-			}
-		});
-	});
+	//socket.on("messages:getAll",function(data){
+	//	var userId = data.userId;
+	//	var currentUser = {
+	//		id:userId,
+	//		socket:socket
+	//	};
+	//	var messageRecordSql = "select record from message_"+userId;
+	//	sqlConnection.query(messageRecordSql,function(err,rows){
+	//		if(err){
+	//			throw err;
+	//		}else{
+	//			if(rows.length){
+	//				currentUser.socket.emit("messages:getAllSuccess",{messages:rows});
+	//			}
+	//			else{
+	//				console.log("暂无聊天记录");
+	//				currentUser.socket.emit("messages:getAllSuccess",{messages:[]});
+	//			}
+	//		}
+	//	});
+	//});
 
 	//监听用户发布聊天内容
 	socket.on('message:send', function(data){
           var userId = data.userId;
 		  var friendId = data.friendId;
+		  //var selectFriendInfo = "select id,nickname,img,backname from userInfo,friends where id='"+userId+"' and friendId='"+userId+"' and userId='"+friendId+"'";
+		  //console.log(userId+"给"+friendId+"发送消息："+data.currentMessage.content);
 		  var message = data.currentMessage;
 		  var friendSocket = onlineUsers[friendId];
+		  //var msgStruct = messageStruct;
 		  message.isFromMe = false;
-		friendSocket.emit("message:receive",{friendId:userId,message:message});
+		  console.log("当前所有在线用户的socket："+onlineUsers.toString());
+		  if(friendSocket){
+			  friendSocket.emit("message:receive",{friendId:userId,message:message});
+		  }
+		  //else{
+			//  sqlConnection.query("select record from message_"+friendId+" where friendId='"+userId+"'",function(err,rows){
+			//	  if(err){
+			//		  throw err;
+			//	  }else{
+			//		  if(rows.length){
+			//			  var record = rows[0].record;
+			//			  if(!isMessageInArray(record.messages,message)){
+			//				  record.messages.push(message);
+			//				  record.lastMessage = message;
+			//				  record.noReadMessages ++;
+			//				  record.showHints= true;
+			//				  sqlConnection.query("update message_"+friendId+" set record='"+JSON.stringify(record)+"' where friendId='"+userId+"'",function(err,rows){
+			//					  if(err){
+			//						  throw err;
+			//					  }else{
+			//						  console.log("离线用户"+friendId+"的聊天记录表已经更新");
+			//					  }
+			//				  });
+			//			  }
+			//		  }
+			//		  else{
+			//			  sqlConnection.query(selectFriendInfo,function(err,rows){
+			//				  if(err){
+			//					  throw err;
+			//				  }else{
+			//					  msgStruct.img=rows[0].img;
+			//					  msgStruct.nickname=rows[0].nickname;
+			//					  msgStruct.backname=rows[0].backname;
+			//					  msgStruct.id=rows[0].id;
+			//					  if(!isMessageInArray(msgStruct.messages,message)){
+			//						  msgStruct.messages.push(message);
+			//						  msgStruct.lastMessage = message;
+			//						  msgStruct.noReadMessages++;
+			//						  sqlConnection.query("update message_"+friendId+" set record='"+JSON.stringify(msgStruct)+"' where friendId='"+userId+"'",function(err,rows){
+			//							  if(err){
+			//								  throw err;
+			//							  }else{
+			//								  console.log("离线用户"+friendId+"的聊天记录已经建立并更新");
+			//							  }
+			//						  });
+			//					  }
+			//				  }
+			//			  })
+			//		  }
+			//	  }
+			//  });
+          //
+		  //}
 	});
 
-	socket.on("updateRecord",function(data){
-		var userRecord = data.record;
-		var updateRecordSql = "update message_"+data.userId+" set record = '"+JSON.stringify(data.record)+"' where friendId='"+data.friendId+"'";
-		var record = {};
-		var friendRecordSql = "select record from message_"+data.friendId+" where friendId = '"+data.userId+"'";
-		console.log(friendRecordSql);
-		sqlConnection.query(friendRecordSql,function(err,rows){
-			if(err){
-				throw err;
-			}else{
-				record = JSON.parse(rows[0].record);
-				record.lastMessage = userRecord.lastMessage;
-				record.messages = userRecord.messages;
-				record.lastMessage.isFromMe = !record.lastMessage.isFromMe;
-				for(var i =0;i<record.messages.length;i++){
-					record.messages[i].isFromMe = !record.messages[i].isFromMe;
-				}
-			}
-		});
-		sqlConnection.query(updateRecordSql,function(err,rows){
-			if(err){
-				throw err;
-			}else if(rows.length){
-				console.log("message_"+data.userId+"表已经更新");
-			}
-		});
-		sqlConnection.query("update message_"+data.friendId+" set record = '"+JSON.stringify(record)+"' where friendId='"+data.userId+"'",function(err,rows){
-			if(err){
-				throw err;
-			}else if(rows.length){
-				console.log("message_"+data.friendId+"表已经更新");
-			}
-		});
-	});
+	//socket.on("updateRecord",function(data){
+	//	var record = data.record;
+	//	var userId = data.userId;
+	//	var friendId = data.friendId;
+	//	var recordExist = data.recordExist;
+	//	var updateRecordSql = "update message_"+userId+" set record = '"+JSON.stringify(record)+"' where friendId='"+friendId+"'";
+     //   var insertRecordSql = "insert into message_"+userId+" values('"+friendId+"','"+JSON.stringify(record)+"')";
+	//	var updateSql = recordExist?updateRecordSql:insertRecordSql;
+	//	sqlConnection.query(updateSql,function(err,rows){
+	//		if(err){
+	//			throw err;
+	//		}else if(rows.length){
+	//			console.log(userId+"的聊天记录表已经更新");
+	//		}
+	//	});
+	//});
+
+	//socket.on("deleteMessage",function(data){
+	//	var userId = data.userId;
+	//	var friendId = data.friendId;
+	//	var deleteMessageSql = "delete from message_"+userId+" where friendId='"+friendId+"'";
+	//	sqlConnection.query(deleteMessageSql,function(err,rows){
+	//		if(err){
+	//			throw err;
+	//		}
+	//	});
+	//});
+
+	//socket.on("message:receiveSuccess",function(data){
+	//	var userId = data.userId;
+	//	var friendId = data.friendId;
+	//	var record = data.record;
+	//	var recordExist = data.recordExist;
+		//var updateRecordSql = "update message_"+userId+" set record='"+JSON.stringify(record)+"' where friendId='"+friendId+"'";
+		//var insertRecordSql = "insert into message_"+userId+" values('"+friendId+"','"+JSON.stringify(record)+"')";
+		//var updateSql = recordExist?updateRecordSql:insertRecordSql;
+		//sqlConnection.query(updateSql,function(err,rows){
+		//	if(err){
+		//		throw err;
+		//	}else{
+		//		console.log(userId+"的聊天记录表已经更新");
+		//	}
+		//});
+	//});
   
 });
 
