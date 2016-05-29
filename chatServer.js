@@ -2,9 +2,21 @@ var app = require('express')();
 var http = require('http').Server(app);
 var io = require('socket.io')(http);
 var mysql = require('mysql');
+var fs = require('fs');
+var url = require('url');
 
-app.get('/', function(req, res){
-	res.send('<h1>Welcome Realtime Server</h1>');
+var writeRecord = function(filename,str){
+	fs.appendFile(filename,str,function(err){
+		if(err){
+			console.log("失败");
+		}
+	})
+};
+
+app.get('/records/*.txt', function(req, res){
+	var filename = url.parse(req.url).pathname;
+	var str = fs.readFileSync("G:\\github\\ionic-chat-server\\"+filename,'utf-8');
+	res.send(str);
 });
 
 var onlineUsers = {};
@@ -370,15 +382,20 @@ io.on('connection', function(socket){
 	socket.on('message:send', function(data){
           var userId = data.userId;
 		  var friendId = data.friendId;
-		  //var selectFriendInfo = "select id,nickname,img,backname from userInfo,friends where id='"+userId+"' and friendId='"+userId+"' and userId='"+friendId+"'";
-		  //console.log(userId+"给"+friendId+"发送消息："+data.currentMessage.content);
 		  var message = data.currentMessage;
 		  var friendSocket = onlineUsers[friendId];
-		  //var msgStruct = messageStruct;
 		  message.isFromMe = false;
-		  console.log("当前所有在线用户的socket："+onlineUsers.toString());
 		  if(friendSocket){
 			  friendSocket.emit("message:receive",{friendId:userId,message:message});
+		  }else{
+			  var offlineMsgSql = "insert into offlineMessages values('"+userId+"','"+friendId+"','"+JSON.stringify(message)+"','"+Date.now()+"')";
+			  sqlConnection.query(offlineMsgSql,function(err,rows){
+				  if(err){
+					  throw err;
+				  }else{
+					  console.log(userId+"给"+friendId+"发送的离线消息已经存储！");
+				  }
+			  });
 		  }
 		  //else{
 			//  sqlConnection.query("select record from message_"+friendId+" where friendId='"+userId+"'",function(err,rows){
@@ -431,6 +448,28 @@ io.on('connection', function(socket){
 		  //}
 	});
 
+	socket.on("getOfflineMsg",function(data){
+		var userId = data.userId;
+		var offlineSql = "select fromUser,message from offlineMessages where toUser='"+userId+"' order by time";
+		var deleteSql = "delete from offlineMessages where toUser='"+userId+"'";
+        sqlConnection.query(offlineSql,function(err,rows){
+			if(err){
+				throw err;
+			}else{
+				if(rows.length){
+					socket.emit("getOfflineMsg:success",{rows:rows});
+					sqlConnection.query(deleteSql,function(err,rows){
+						if(err){
+							throw err;
+						}else{
+							console.log("离线消息更新成功！");
+						}
+					})
+				}
+			}
+		})
+	});
+
 	//socket.on("updateRecord",function(data){
 	//	var record = data.record;
 	//	var userId = data.userId;
@@ -475,6 +514,44 @@ io.on('connection', function(socket){
 		//	}
 		//});
 	//});
+
+	socket.on("downloadRecord",function(data){
+		var user = data.user;
+		var friendName = data.backname;
+		var fileName = "records/USER"+user.id+"("+data.friendId+").txt";
+        var messages = data.messages;
+		var str = "";
+		fs.writeFile(fileName,"",function(err){
+			if(err){
+				console.log("失败："+err);
+			}else{
+				console.log("成功创建文件!");
+			}
+		});
+		for(var i=0;i<messages.length;i++){
+			  if(messages[i].isFromMe){
+				  str = messages[i].screenTime+" "+user.nickname+"说: "+messages[i].content+"\r\n";
+				  writeRecord(fileName,str);
+			  }else{
+				  str = messages[i].screenTime+" "+friendName+"说: "+messages[i].content+"\r\n";
+				  writeRecord(fileName,str);
+			  }
+		}
+	});
+
+	socket.on("modifyPassword",function(data){
+		var userId = data.userId;
+		var newPwd = data.newPwd;
+		var updatePwdSql = "update userInfo set password = '"+newPwd+"' where id='"+userId+"'";
+		sqlConnection.query(updatePwdSql,function(err,rows){
+			if(err){
+				console.log("修改密码失败！");
+			}else{
+				console.log("用户"+userId+"修改密码成功！");
+				socket.emit("modifyPassword:success",{info:"修改密码成功！"});
+			}
+		});
+	});
   
 });
 
