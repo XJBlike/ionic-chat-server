@@ -64,13 +64,11 @@ io.on('connection', function(socket){
 		if(onlineUsers[obj.userId]){
 			socket.emit("login:fail",{err:"不能重复登录！"});
 		}else{
-			onlineUsers[obj.userId] = socket;
 			socket.id = obj.userId;
 			var currentUser = {
 				id: obj.userId,
 				socket:socket
 			};
-			console.log("登录，刚登陆的用户socket为："+onlineUsers[currentUser.id].toString());
 			var loginSql = 'select * from userInfo where id=\''
 				+ obj.userId
 				+ '\' and password=\''
@@ -82,7 +80,8 @@ io.on('connection', function(socket){
 				}else{
 					if(rows.length > 0){
 						currentUser.socket.emit("login:success",{userInfo: rows[0]});
-						console.log(rows[0].id+"("+rows[0].nickname+")登录成功")
+						console.log(rows[0].id+"("+rows[0].nickname+")登录成功");
+						onlineUsers[obj.userId] = socket;
 					}
 					else{
 						currentUser.socket.emit("login:fail",{err: "用户名或密码错误!"});
